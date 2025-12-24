@@ -14,7 +14,6 @@ from torch_geometric.data.batch import Batch
 from torch.nn.utils.rnn import pad_sequence
 from parameters import args
 
-
 class DGHANlayer(torch.nn.Module):
     def __init__(self, in_chnl, out_chnl, dropout, concat, heads=1):
         super(DGHANlayer, self).__init__()

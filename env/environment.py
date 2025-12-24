@@ -14,7 +14,7 @@ from env.message_passing_evl import MassagePassingEval
 import networkx as nx
 import random
 from env.message_passing_evl import cpm_forward_and_backward
-
+import logging
 
 def index_to_mask(index, size=None):
     """
@@ -39,6 +39,7 @@ class Env:
     ):
 
         self.itr = 0
+        self.logger = logging.getLogger('env')
         self.dur_norm = dur_norm
         self.est_lst_norm = est_lst_norm
         self.evaluator = MassagePassingEval()
@@ -191,7 +192,7 @@ class Env:
         est, lst, make_span, count, fwd_topo_batches, bwd_topo_batches = self.evaluator.eval(
             G_batch, num_nodes_per_example=self.num_nodes_per_example)
         if prt:
-            print('Message-passing takes: {:.5f}'.format(time.time() - t_))
+            self.logger.info('Message-passing takes: {:.5f}'.format(time.time() - t_))
 
         ## update graph node features to include normalized est, lst, and dur
         dur_fea = G_batch.dur / self.dur_norm
@@ -261,7 +262,7 @@ class Env:
                 longest_paths = list(
                     nx.all_shortest_paths(sub_nxg, source=s, target=t, weight='edge_attr', method='bellman-ford'))
                 longest_paths = sorted(longest_paths)
-                # print(longest_paths)
+                # self.logger.info(longest_paths)
                 first_path = longest_paths[0]  # always select the first path
                 paths_all.append([first_path])
                 assert torch.equal(self.G_batch.dur[first_path].sum().float(),
@@ -275,7 +276,7 @@ class Env:
             _t1 = time.time()
             paths_all = self.longest_paths()
             paths_all = [sorted([p.cpu().numpy().tolist() for p in ps]) for ps in paths_all]
-            # print(paths_all)
+            # self.logger.info(paths_all)
             paths_all = [[ps[0]] for ps in paths_all]  # always select the first path
             _t2 = time.time()
         else:
@@ -328,7 +329,7 @@ class Env:
                     if blks[-1].shape[0] >= 2:
                         moves[instance_id].append(blks[-1][:2, 0])
             merge_move = [[torch.stack(mv, dim=0)] if len(mv) > 0 else [] for mv in moves]
-            # print(merge_move)
+            # self.logger.info(merge_move)
 
             # remove previous selected actions if required
             if self.mask_previous_action:
@@ -358,18 +359,18 @@ class Env:
             _t6 = time.time()
 
             if prt:
-                print('Calculating critical paths takes {:.4f}'.format(_t2 - _t1))
-                print('Calculating critical block takes {:.4f}'.format(_t4 - _t3))
-                print('Calculating N5 moves with tabu takes {:.4f}'.format(_t6 - _t5))
-                print('Total time for calculating N5 moves: {:.4f}'.format(time.time() - t0))
-                # print('Total number of paths: {} for total {} instances'.format(
+                self.logger.info('Calculating critical paths takes {:.4f}'.format(_t2 - _t1))
+                self.logger.info('Calculating critical block takes {:.4f}'.format(_t4 - _t3))
+                self.logger.info('Calculating N5 moves with tabu takes {:.4f}'.format(_t6 - _t5))
+                self.logger.info('Total time for calculating N5 moves: {:.4f}'.format(time.time() - t0))
+                # self.logger.info('Total number of paths: {} for total {} instances'.format(
                 #     sum([1 for ps in paths_all for _ in ps]),
                 #     self.num_instance))
-                # print('Block joint:\n', blk_joint)
+                # self.logger.info('Block joint:\n', blk_joint)
                 # for i, blks in enumerate(blk_split):
-                #     print('Critical blocks for instance {}:'.format(i))
+                #     self.logger.info('Critical blocks for instance {}:'.format(i))
                 #     for b in blks:
-                #         print(b)
+                #         self.logger.info(b)
 
         else:
             raise NotImplementedError('Not support other NS yet.')
@@ -406,7 +407,7 @@ class Env:
                            self.get_candidate_moves(prt=show_action_space_compute_time)
                 action = torch.stack(action)
             t2_ = time.time()
-            # print(t2_ - t1_)
+            # self.logger.info(t2_ - t1_)
 
             # action: u -> v
             u = action[:, 0]
@@ -435,7 +436,7 @@ class Env:
                 [edge_index_disjunctions, _edge_m_neg_u_to_v, _edge_v_to_u, _edge_u_to_mv], dim=1
             )  # unsorted
             t3_ = time.time()
-            # print(t3_ - t2_)
+            # self.logger.info(t3_ - t2_)
 
             ## update pygs
             # update edge_index_disjunctions
@@ -476,9 +477,9 @@ class Env:
             self.itr += 1
 
             t4_ = time.time()
-            # print(t4_ - t3_)
+            # self.logger.info(t4_ - t3_)
             if prt:
-                print("Step takes {:.4f} for N5 for {} instances.".format(t4_ - t1_, self.num_instance))
+                self.logger.info("Step takes {:.4f} for N5 for {} instances.".format(t4_ - t1_, self.num_instance))
 
             return self.G_batch, reward.unsqueeze(-1), self.get_candidate_moves(prt=show_action_space_compute_time)
         else:
@@ -498,11 +499,11 @@ class Env:
             earliest_start_time, latest_start_time, makespan = cpm_forward_and_backward(nxg)
             makespan_cpm.append(makespan)
         makespan_cpm = torch.tensor(makespan_cpm, dtype=torch.float, device=self.current_objs.device)
-        # print(makespan_cpm)
+        # self.logger.info(makespan_cpm)
         if torch.equal(makespan_cpm, self.current_objs):
-            print("Pass validation with CPM.")
+            self.logger.info("Pass validation with CPM.")
         else:
-            print("Not pass validation with CPM.")
+            self.logger.info("Not pass validation with CPM.")
 
     @staticmethod
     def edges_start_from_given_nodes(given_nodes, edge_index, total_num_nodes_in_graph):
@@ -536,9 +537,9 @@ class Env:
         critical_u, critical_v = critical_edges = connects[:, critical_edge_mask]
         critical_paths = critical_edges
         collect_path = [[] for _ in range(self.num_instance)]
-        # print(self.S)
+        # self.logger.info(self.S)
         while critical_edges.shape[1] != 0:
-            # print(T)
+            # self.logger.info(T)
             u, v = connects = self.edges_start_from_given_nodes(
                 given_nodes=critical_v,
                 edge_index=edge_index,
@@ -611,7 +612,7 @@ class Env:
             self.machine_count.cumsum(dim=0) - self.machine_count,
             self.num_nodes_per_example)
 
-        # print('Computing initial solutions...')
+        # self.logger.info('Computing initial solutions...')
         G_batch, make_span, count = self._init_solver(init=init_sol_type, device=device, p_lists=p_lists)
 
         self.current_objs, self.incumbent_objs = make_span, make_span

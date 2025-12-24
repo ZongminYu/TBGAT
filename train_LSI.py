@@ -5,7 +5,7 @@ import numpy.random
 import torch
 import torch.optim as optim
 from env.environment import Env
-from model.actor import Actor
+from model.LSI import LSI_Model
 from env.generateJSP import uni_instance_gen as inst_gen
 from pathlib import Path
 from env.message_passing_evl import exact_solver
@@ -208,7 +208,7 @@ class NeuralTabu:
                                            args.embed_tabu_label)
               )
 
-        policy = Actor(
+        policy = LSI_Model(
             in_channels_fwd=args.in_channels_fwd,
             in_channels_bwd=args.in_channels_bwd,
             hidden_channels=args.hidden_channels,
