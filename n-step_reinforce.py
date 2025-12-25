@@ -226,6 +226,7 @@ class NeuralTabu:
         pbar = tqdm(range(1, args.total_instances // args.batch_size + 1))
 
         for batch_i in pbar:
+            self.logger.info("start train batch_i :{}".format(batch_i))
 
             t1 = time.time()
 

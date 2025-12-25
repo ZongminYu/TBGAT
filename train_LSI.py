@@ -231,6 +231,7 @@ class NeuralTabu:
 
             # generate training data on the fly
             instances = np.array([inst_gen(args.j, args.m, args.l, args.h) for _ in range(args.batch_size)])
+            # instances.shape (64, 2, 10, 10)
 
             # reset the training env with training data
             G, (action_set, optimal_mark, paths) = self.env_training.reset(
@@ -245,6 +246,8 @@ class NeuralTabu:
             log_prob_buffer = []
             entropy_buffer = []
 
+            self.logger.info("G")
+            self.logger.info(G)
             while self.env_training.itr < args.transit:
 
                 # forward

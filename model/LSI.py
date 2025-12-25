@@ -16,9 +16,9 @@ from parameters import args
 import torch.nn as nn
 
 from logging import getLogger
-torch.set_printoptions(
-    threshold=float('inf'),  # 不省略任何元素
-)
+# torch.set_printoptions(
+#     threshold=float('inf'),  # 不省略任何元素
+# )
 
 input_dim_ = 3
 hidden_dim_ = 128
@@ -41,10 +41,23 @@ class LSI_Model(nn.Module):
         self.decoder = LSI_Decoder()
 
     def forward(self, pyg_sol, feasible_action, optimal_mark, cmax=None, drop_out=0):
-        encoder_operations = self.encoder(pyg_sol)
+        x = pyg_sol.x
+        edge_index = pyg_sol.edge_index
+        batch = pyg_sol.batch
+        # x.torch.Size([6528, 5])
+        # edge_index.torch.Size([2, 12800])
+
+        self.logger.info("x")
+        self.logger.info(x.shape)
+        self.logger.info(x)
+        self.logger.info("edge_index")
+        self.logger.info(edge_index.shape)
+        self.logger.info(edge_index)
+
+        node_h = self.encoder(x, batch)
         # shape: (batch, j, k, hidden_dim)
         
-        probs = self.decoder(encoder_operations)
+        probs = self.decoder(node_h)
 
 
         return probs
@@ -72,9 +85,9 @@ class LSI_Encoder(nn.Module):
             nn.LeakyReLU(),
         )
 
-    def forward(self, data):
+    def forward(self, x, batch):
         # data.shape: (batch, j, m, feature_dim)
-
+        
         out = self.layers(data)
         # shape: (batch, j, k, hidden_dim)
 

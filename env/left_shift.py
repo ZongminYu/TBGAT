@@ -1,6 +1,13 @@
 import numpy as np
 
-
+# 这个函数是作业车间调度（JSSP） 中核心的「工序左移合法性校验与起始时间计算」函数，
+# 核心逻辑是：对指定工序 a，先计算其作业就绪时间和设备就绪时间，再判断是否能将该工序 “左移” 插入设备的空闲时段（而非直接放到设备任务队列末尾），
+# 最终返回工序 a 的最优起始时间，以及是否成功左移的标记。
+# a 待调度的工序编号 int
+# durMat 工序时长矩阵（一维 / 二维），durMat[a] 表示工序 a 的加工时长 np.array
+# mchMat 工序 - 设备映射矩阵（一维 / 二维），mchMat[a] 表示工序 a 对应的设备编号 np.array
+# mchsStartTimes 各设备的任务起始时间列表，mchsStartTimes[m] 是设备 m 的所有任务起始时间 list[np.array]
+# opIDsOnMchs 各设备的已分配工序列表，opIDsOnMchs[m] 是设备 m 已安排的工序编号 list[np.array]
 def permissibleLeftShift(a, durMat, mchMat, mchsStartTimes, opIDsOnMchs):
     jobRdyTime_a, mchRdyTime_a = calJobAndMchRdyTimeOfa(a, mchMat, durMat, mchsStartTimes, opIDsOnMchs)
     dur_a = np.take(durMat, a)
