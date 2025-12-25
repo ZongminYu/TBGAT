@@ -1,0 +1,4 @@
+[2026-01-04 23:59:07] train_LSI.py(179) : Use cuda to train...
+[2026-01-04 23:59:07] train_LSI.py(180) : JSSP, 10x10, init_type=fdd-divide-wkr, lr=5e-05, action_selection_type=ls, ent_coeff=1e-05, tabu_size=-1, embed_net=TPMCAM, hidden_channels=128, out_channels=128, heads=4, dropout_for_gat=0, steps_learn=10, transit=500, batch_size=64, total_instances=128000, step_validation=10, training_seed=6, embed_tabu_label=False
+[2026-01-05 00:06:01] train_LSI.py(154) : Saving trained_model in batch_i :10
+[2026-01-05 07:04:31] train_LSI.py(154) : Saving trained_model in batch_i :630

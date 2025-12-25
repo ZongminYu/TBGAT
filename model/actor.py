@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -355,6 +356,7 @@ class Actor(torch.nn.Module):
 
         ## compute action probability
         # get action embedding ready
+        # t1_ = time.time()
         action_merged_with_tabu_label = torch.cat([actions[0] for actions in action_set if actions], dim=0)
         actions_merged = action_merged_with_tabu_label[:, :2]
         tabu_label = action_merged_with_tabu_label[:, [2]]
@@ -370,9 +372,13 @@ class Actor(torch.nn.Module):
         if not args.embed_tabu_label:
             action_h = action_h[:, :-1]
 
+        # print("actions_merged.shape:", actions_merged.shape)
+        # print("actions_merged:", actions_merged)
         # compute action score
         action_count = [actions[0].shape[0] for actions in action_set if actions]  # if no action then ignore
+        # print("action_count:", action_count)
         action_score = self.policy(action_h)
+        # print("action_score.shape:", action_score.shape)
         _max_count = max(action_count)
         actions_score_split = list(torch.split(action_score, split_size_or_sections=action_count))
         padded_score = pad_sequence(actions_score_split, padding_value=-torch.inf).transpose(0, -1).transpose(0, 1)
@@ -414,6 +420,8 @@ class Actor(torch.nn.Module):
         )
         entropy_padded[~optimal_mark, :] = entropy.squeeze()
 
+        # t2_ = time.time()
+        # print("Move selector LS takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, len(action_set)))
         return sampled_action, log_prob_padded, entropy_padded
 
     def move_selector_ts_outer(self,

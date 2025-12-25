@@ -16,12 +16,14 @@ from parameters import args
 import torch.nn as nn
 
 from logging import getLogger
-torch.set_printoptions(
-    threshold=float('inf'),  # 不省略任何元素
-)
+# torch.set_printoptions(
+#     threshold=float('inf'),  # 不省略任何元素
+# )
 
 input_dim_ = 3
-hidden_dim_ = 128
+output_dim_ = 128
+hidden_dim_ = 512
+decoder_input_dim_ = 128+3+128+3+128+1+1  # h_u, x_u, h_v, x_v, h_g, P, T
 
 class LSI_Model(nn.Module):
 
@@ -36,19 +38,154 @@ class LSI_Model(nn.Module):
                  ):
 
         super().__init__()
-        self.logger = getLogger(name='trainer')
+        self.logger = getLogger(name='root')
         self.encoder = LSI_Encoder()
-        self.decoder = LSI_Decoder()
+        self.policy = LSI_Decoder()
 
-    def forward(self, pyg_sol, feasible_action, optimal_mark, cmax=None, drop_out=0):
-        encoder_operations = self.encoder(pyg_sol)
-        # shape: (batch, j, k, hidden_dim)
+    def forward(self, pyg_sol, feasible_action, optimal_mark, cmax=None, P=None, T=None, action_instance_id=None, drop_out=0):
+        x = pyg_sol.x[:, [0, 1, 2]]  # only use three features: dur_fea, est_fea, lst_fea
+        edge_index = pyg_sol.edge_index
+        batch = pyg_sol.batch
+        # x.torch.Size([batch * (j * m + 2), 3])
+        # len(feasible_action) = batch
+
+
+        node_h = self.encoder(x)
+        # node_h.torch.Size([batch * (j * m + 2), output_dim_])
+
+
+
+        sampled_action, log_prob_padded, entropy_padded = self.move_selector_lsi(action_set = feasible_action,
+                         node_h = node_h,
+                         optimal_mark = optimal_mark,
+                         batch=batch,
+                         x=x,
+                         action_instance_id=action_instance_id,
+                         P=P,
+                         T=T)
+
+
+        return sampled_action, log_prob_padded, entropy_padded
+    
+    def move_selector_lsi(self,
+                         action_set,
+                         node_h,
+                         optimal_mark,
+                         batch=None,
+                         x=None,
+                         action_instance_id=None,
+                         P=None,
+                         T=None):
+
+        ## compute action probability
+        # get action embedding ready
+        action_merged_with_tabu_label = torch.cat([actions[0] for actions in action_set if actions], dim=0)
+        actions_merged = action_merged_with_tabu_label[:, :2]
+        tabu_label = action_merged_with_tabu_label[:, [2]]
         
-        probs = self.decoder(encoder_operations)
+
+        h_g = global_mean_pool(node_h, batch)  # global embedding, shape: (batch, output_dim_)
+        # h_g torch.Size([3, output_dim_])
+        hg = h_g[action_instance_id]
+        # hg.shape: (all_actions_num, output_dim_)
+
+        u = actions_merged[:, 0]
+        v = actions_merged[:, 1]
+        
+        h_u = node_h[u]
+        x_u = x[u]
+        h_v = node_h[v]
+        x_v = x[v]
+
+        # self.logger.info("into move_selector_lsi")
+        # self.logger.info("h_u.shape: {}".format(h_u.shape))
+        # self.logger.info("x_u.shape: {}".format(x_u.shape))
+        # self.logger.info("h_v.shape: {}".format(h_v.shape))
+        # self.logger.info("x_v.shape: {}".format(x_v.shape))
+        # self.logger.info("h_g.shape: {}".format(h_g.shape))
+        # self.logger.info("P.shape: {}".format(P.shape))
+        # self.logger.info("T.shape: {}".format(T.shape))
+
+        # h_u.shape: torch.Size([17, 128])
+        # x_u.shape: torch.Size([17, 3])
+        # h_v.shape: torch.Size([17, 128])
+        # x_v.shape: torch.Size([17, 3])
+        # hg.shape: torch.Size([17, 128])
+        # P.shape: torch.Size([17])
+        # T.shape: torch.Size([17])
 
 
-        return probs
+        action_h = torch.cat(
+            [
+                node_h[u],       # [all_actions_num, 128]
+                x[u],            # [all_actions_num, 3]
+                node_h[v],       # [all_actions_num, 128]
+                x[v],            # [all_actions_num, 3]
+                hg,              # [all_actions_num, 128]
+                P.unsqueeze(-1), # [all_actions_num] → [all_actions_num, 1]
+                T.unsqueeze(-1)  # [all_actions_num] → [all_actions_num, 1]
+            ],
+            dim=-1  # 按最后一维（列维度）拼接
+        )
 
+        if not args.embed_tabu_label:
+            action_h = action_h[:, :-1]
+
+        # self.logger.info("action_h.shape: {}".format(action_h.shape))
+        # self.logger.info("action_h: {}".format(action_h))
+        # compute action score
+        action_count = [actions[0].shape[0] for actions in action_set if actions]  # if no action then ignore
+        # self.logger.info("action_count: {}".format(action_count))
+        action_score = self.policy(action_h)
+        # self.logger.info("action_score.shape: {}".format(action_score.shape))
+        _max_count = max(action_count)
+        actions_score_split = list(torch.split(action_score, split_size_or_sections=action_count))
+        padded_score = pad_sequence(actions_score_split, padding_value=-torch.inf).transpose(0, -1).transpose(0, 1)
+
+        # sample actions
+        pi = F.softmax(padded_score, dim=-1)
+        dist = Categorical(probs=pi)
+        action_id = dist.sample()
+        padded_action = pad_sequence(
+            [actions[0][:, :2] for actions in action_set if actions],
+        ).transpose(0, 1)
+        sampled_action = torch.gather(
+            padded_action, index=action_id.repeat(1, 2).view(-1, 1, 2), dim=1
+        ).squeeze(dim=1)
+        # self.logger.info(feasible_action)
+        # self.logger.info(action_id)
+        # self.logger.info(sampled_action)
+
+        # greedy action
+        # action_id = torch.argmax(pi, dim=-1)
+
+        # compute log_p and policy entropy regardless of optimal sol
+        log_prob = dist.log_prob(action_id)
+        entropy = dist.entropy()
+
+        # compute padded log_p, where optimal sol has 0 log_0, since no action, otherwise cause shape bug
+        log_prob_padded = torch.zeros(
+            size=optimal_mark.shape,
+            device=action_h.device,
+            dtype=torch.float
+        )
+        log_prob_padded[~optimal_mark, :] = log_prob.squeeze()
+
+        # compute padded ent, where optimal sol has 0 ent, since no action, otherwise cause shape bug
+        entropy_padded = torch.zeros(
+            size=optimal_mark.shape,
+            device=action_h.device,
+            dtype=torch.float
+        )
+        entropy_padded[~optimal_mark, :] = entropy.squeeze()
+
+        # self.logger.info("sampled_action.shape: {}".format(sampled_action.shape))
+        # self.logger.info("sampled_action: {}".format(sampled_action))
+        # self.logger.info("log_prob_padded.shape: {}".format(log_prob_padded.shape))
+        # self.logger.info("log_prob_padded: {}".format(log_prob_padded))
+        # self.logger.info("entropy_padded.shape: {}".format(entropy_padded.shape))
+        # self.logger.info("entropy_padded: {}".format(entropy_padded))
+        return sampled_action, log_prob_padded, entropy_padded
 
 ########################################
 # ENCODER
@@ -68,17 +205,17 @@ class LSI_Encoder(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, output_dim_),
             nn.LeakyReLU(),
         )
 
-    def forward(self, data):
+    def forward(self, x):
         # data.shape: (batch, j, m, feature_dim)
-
-        out = self.layers(data)
+        
+        node_h = self.layers(x)
         # shape: (batch, j, k, hidden_dim)
 
-        return out
+        return node_h
 
 ########################################
 # DECODER
@@ -91,32 +228,29 @@ class LSI_Decoder(nn.Module):
         hidden_dim = hidden_dim_
 
         self.layers = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(decoder_input_dim_, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, 1),
         )
 
-    def forward(self, encoded_last_node, ninf_mask):
-        # encoded_last_node.shape: (batch, B, embedding)
-        # ninf_mask.shape: (batch, B, problem)
-
-        action_scores = self.layers(encoded_last_node)
-
-        probs = F.softmax(score_masked, dim=2)
-        # shape: (batch, B, problem)
-
-        return probs
-
+    def forward(self, h_uv):
+        """
+        参数说明：
+        h_uv: 所有候选action的特征，shape=(all_actions_num, decoder_input_dim_)
+        """
+        action_scores = self.layers(h_uv)  
+        # shape: (all_actions_num, 1)
+        return action_scores
 
 if __name__ == '__main__':
     import time
     import random
     from env.generateJSP import uni_instance_gen
-    from env.environment import Env
+    from env.LSI_environment import Env
 
     # j, m, batch_size = {'low': 100, 'high': 101}, {'low': 20, 'high': 21}, 500
     # j, m, batch_size = {'low': 30, 'high': 31}, {'low': 20, 'high': 21}, 64
@@ -174,7 +308,7 @@ if __name__ == '__main__':
             insts.append(inst)
 
     # insts = np.load('../test_data_jssp/tai20x15.npy')
-    # print(insts)
+    # self.logger.info(insts)
 
     env = Env()
     G, (feasible_a, mark, paths) = env.reset(
@@ -188,7 +322,7 @@ if __name__ == '__main__':
 
     env.cpm_eval()
 
-    # print(env.instance_size)
+    # self.logger.info(env.instance_size)
 
     net = LSI_Model(
         in_channels_fwd=3,

@@ -4,7 +4,7 @@ import numpy as np
 import numpy.random
 import torch
 import torch.optim as optim
-from env.environment import Env
+from env.LSI_environment import Env
 from model.LSI import LSI_Model
 from env.generateJSP import uni_instance_gen as inst_gen
 from pathlib import Path
@@ -114,10 +114,19 @@ class NeuralTabu:
 
         # rollout
         while self.env_validation.itr < args.transit:
+            P, T, action_instance_id = self.env_training.indicators(
+                G=G,
+                tabu_list=self.env_validation.tabu_list,
+                feasible_action=action_set
+            )
+
             sampled_a, log_p, ent = policy(
                 pyg_sol=G,
                 feasible_action=action_set,
                 optimal_mark=optimal_mark,
+                P=P,
+                T=T,
+                action_instance_id=action_instance_id
             )
 
             G, reward, (action_set, optimal_mark, paths) = self.env_validation.step(
@@ -125,7 +134,7 @@ class NeuralTabu:
                 prt=False,
                 show_action_space_compute_time=False
             )
-
+        
         # calculate optimal gap
         result_incumbent = self.env_validation.incumbent_objs.cpu().numpy()
         result_last_step = self.env_validation.current_objs.cpu().numpy()
@@ -231,6 +240,7 @@ class NeuralTabu:
 
             # generate training data on the fly
             instances = np.array([inst_gen(args.j, args.m, args.l, args.h) for _ in range(args.batch_size)])
+            # instances.shape (64, 2, 10, 10)
 
             # reset the training env with training data
             G, (action_set, optimal_mark, paths) = self.env_training.reset(
@@ -245,13 +255,36 @@ class NeuralTabu:
             log_prob_buffer = []
             entropy_buffer = []
 
-            while self.env_training.itr < args.transit:
+            self.logger.info("G")
+            self.logger.info(G)
+            self.logger.info("G.edge_index_conjunctions.shape: {}".format(G.edge_index_conjunctions.shape))
+            self.logger.info("G.edge_index_conjunctions: {}".format(G.edge_index_conjunctions))
+            self.logger.info("G.edge_index_disjunctions.shape: {}".format(G.edge_index_disjunctions.shape))
+            self.logger.info("G.edge_index_disjunctions: {}".format(G.edge_index_disjunctions))
+            self.logger.info("G.x: {}".format(G.x))
+            self.logger.info("G.dur: {}".format(G.dur))
+            self.logger.info("G.est: {}".format(G.est))
+            self.logger.info("G.lst: {}".format(G.lst))
 
+
+            while self.env_training.itr < args.transit:
+                
+                self.logger.info("self.env_training.itr: {}".format(self.env_training.itr))
                 # forward
+                # Theoretical indicators
+                P, T, action_instance_id = self.env_training.indicators(
+                    G=G,
+                    tabu_list=self.env_training.tabu_list,
+                    feasible_action=action_set
+                )
+
                 sampled_a, log_p, ent = policy(
                     pyg_sol=G,
                     feasible_action=action_set,
                     optimal_mark=optimal_mark,
+                    P=P,
+                    T=T,
+                    action_instance_id=action_instance_id
                 )
 
                 # step

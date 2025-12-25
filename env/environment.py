@@ -69,12 +69,13 @@ class Env:
         Gs = []
         for _, instance in enumerate(self.instances):
 
-            ## preparation
+            ## preparation shape(j, m)
             dur_mat, mch_mat = instance[0], instance[1]
             n_jobs, n_machines = dur_mat.shape[0], dur_mat.shape[1]
             n_operations = n_jobs * n_machines
+            # last_col.shape (10,) 0,10,20...90
             last_col = np.arange(start=0, stop=n_operations, step=1).reshape(n_jobs, -1)[:, -1]
-            # initialize action space: [n_jobs,], the first column
+            # initialize action space: [n_jobs,], the first column. candidate_oprs.shape (10,) 9,19,29...99
             candidate_oprs = np.arange(start=0, stop=n_operations, step=1).reshape(n_jobs, -1)[:, 0]
             # initialize the mask: [n_jobs,]
             mask = np.zeros(shape=n_jobs, dtype=bool)
@@ -87,18 +88,18 @@ class Env:
             # initialize action
             actions = []
 
-            ## construct adj for precedent constraint
-            # Create adjacent matrix for precedence constraints
+            ## 核心作用：构建「工序间硬约束」的有向图，保证作业内工序的先后顺序（如作业 1：0→1→2），S/T 节点统一全局起止逻辑。
+            # 步骤1：初始化下三角相邻矩阵（工序i依赖工序i-1）
             adj_mat_pc = np.eye(n_operations, k=-1, dtype=int)
-            # first column does not have upper stream conj_nei
+            # 步骤2：清零作业首工序的行（首工序无前置依赖）
             adj_mat_pc[np.arange(start=0, stop=n_operations, step=1).reshape(n_jobs, -1)[:, 0]] = 0
-            # pad dummy S and T nodes
+            # 步骤3：填充虚拟S（起始）、T（终止）节点（矩阵扩容为(n_ops+2)×(n_ops+2)）
             adj_mat_pc = np.pad(adj_mat_pc, 1, 'constant', constant_values=0)
-            # connect S with 1st operation of each job
+            # 步骤4：S节点（索引0）连接所有作业首工序
             adj_mat_pc[[_ for _ in range(1, n_operations + 2 - 1, n_machines)], 0] = 1
-            # connect last operation of each job to T
+            # 步骤5：所有作业末工序连接T节点（最后一行）
             adj_mat_pc[-1, [_ for _ in range(n_machines, n_operations + 2 - 1, n_machines)]] = 1
-            # convert input adj from column pointing to row, to, row pointing to column
+            # 步骤6：转置矩阵（调整依赖指向：行→列，符合GNN邻接矩阵规范）
             adj_mat_pc = np.transpose(adj_mat_pc)
 
             ## construct adjacent matrix for machine clique
@@ -122,6 +123,7 @@ class Env:
                         raise RuntimeError('Rule must be one of "spt" or "fdd-divide-wkr".')
                     actions.append(action)
 
+                    # 核心：计算工序的合法起始时间（左移策略）
                     permissibleLeftShift(
                         a=action,
                         durMat=dur_mat,
@@ -130,14 +132,15 @@ class Env:
                         opIDsOnMchs=opIDsOnMchs
                     )
 
-                    # update action space or mask
+                    # # 更新候选工序/掩码：若不是作业最后一道工序，候选工序+1；否则标记作业完成
                     if action not in last_col:
                         candidate_oprs[action // n_machines] += 1
                     else:
                         mask[action // n_machines] = 1
-                    # update finished_mark:
+                    # # 更新工序完成标记
                     finished_mark[action // n_machines, action % n_machines] = 1
 
+                # 构建设备clique矩阵：同一设备上，后工序指向先工序（表示执行顺序）
                 for i in range(opIDsOnMchs.shape[1] - 1):
                     adj_mat_mc[opIDsOnMchs[:, i + 1], opIDsOnMchs[:, i]] = 1
                 # add S and T to machine clique adj
@@ -465,7 +468,7 @@ class Env:
             self.incumbent_objs = torch.minimum(self.incumbent_objs, make_span)
             self.current_objs = make_span
             # update tabu list and do_not_select
-            action_instance_id = self.G_batch.batch[u].cpu().numpy()
+            action_instance_id = self.G_batch.batch[u].cpu().numpy() # G_batch.batch: PyG Batch 类的核心属性，标识每个节点属于哪个图实例
             for a_reversed, instance_id in zip(action.flip([1]), action_instance_id):
                 # update tabu list
                 self.tabu_list[instance_id] = torch.cat(
