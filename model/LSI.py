@@ -205,8 +205,7 @@ class LSI_Encoder(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LeakyReLU(),
-            nn.Linear(hidden_dim, output_dim_),
-            nn.LeakyReLU(),
+            nn.Linear(hidden_dim, output_dim_)
         )
 
     def forward(self, x):
@@ -236,7 +235,6 @@ class LSI_Decoder(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, 1),
         )
-
     def forward(self, h_uv):
         """
         参数说明：

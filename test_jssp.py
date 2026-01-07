@@ -4,10 +4,11 @@ import time
 import random
 from env.environment import Env
 from model.actor import Actor
+# from env.LSI_environment import Env
+# from model.LSI import LSI_Model as Actor
 from ortools_solver import MinimalJobshopSat
 from parameters import args
 import pandas as pd
-
 
 def main():
     seed = args.t_seed
@@ -19,7 +20,7 @@ def main():
     print('using {} to test...'.format(dev))
 
     # MDP config
-    performance_milestones = [500, 1000, 2000, 5000, 16000, 20000]  # [500, 1000, 2000, 5000]
+    performance_milestones = [500, 1000, 2000, 5000]
     result_type = 'incumbent'  # 'last_step', 'incumbent'
     init = 'fdd-divide-wkr'  # 'fdd-divide-wkr', 'spt'
 
@@ -122,9 +123,10 @@ def main():
             ).to(dev).eval()
 
             saved_model_path = './saved_model/incumbent_model_' + algo_config + '.pth'
+            # saved_model_path = './20260104_235907/Dv_-1-fdd-divide-wkr_128-128-4-0-LSI_JSSP-10x10-5e-05-10-500-64-128000-10-1e-05-6-False-ls-checkpoint-10.pt'
+            # saved_model_path = 'saved_model/retrain/incumbent_model_-1-fdd-divide-wkr_128-128-4-0-TPMCAM_JSSP-10x10-5e-05-10-500-64-128000-10-1e-05-6-False-ls.pth'
             print('loading model from:', saved_model_path)
             policy.load_state_dict(torch.load(saved_model_path, map_location=torch.device(dev)))
-
             pytorch_total_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
             print('Total number of parameters of model: \n{}\n is:'.format(saved_model_path), pytorch_total_params)
 
