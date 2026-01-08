@@ -237,14 +237,14 @@ def util_print_log_array(logger, result_log: LogData):
 
 
 def util_save_log_image_with_label(result_file_prefix,
-                                   img_params,
+                                   style_image_config_file,
                                    result_log: LogData,
                                    labels=None):
     dirname = os.path.dirname(result_file_prefix)
     if not os.path.exists(dirname):
         os.makedirs(dirname)
 
-    _build_log_image_plt(img_params, result_log, labels)
+    _build_log_image_plt(style_image_config_file, result_log, labels)
 
     if labels is None:
         labels = result_log.get_keys()
@@ -254,17 +254,17 @@ def util_save_log_image_with_label(result_file_prefix,
     plt.close(fig)
 
 
-def _build_log_image_plt(img_params,
+def _build_log_image_plt(style_image_config_file,
                          result_log: LogData,
                          labels=None):
     assert type(result_log) == LogData, 'use LogData Class for result_log.'
 
     # Read json
-    folder_name = img_params['json_foldername']
-    file_name = img_params['filename']
-    log_image_config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), folder_name, file_name)
+    # folder_name = img_params['json_foldername']
+    # file_name = img_params['filename']
+    # style_image_config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), folder_name, file_name)
 
-    with open(log_image_config_file, 'r') as f:
+    with open(style_image_config_file, 'r') as f:
         config = json.load(f)
 
     figsize = (config['figsize']['x'], config['figsize']['y'])

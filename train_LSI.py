@@ -18,6 +18,7 @@ class NeuralTabu:
     def __init__(self):
         self.result_folder = get_result_folder()
         self.logger = logging.getLogger('root')
+        self.result_log = LogData()
         self.env_training = Env()
         self.env_validation = Env()
         self.eps = np.finfo(np.float32).eps.item()
@@ -331,7 +332,7 @@ class NeuralTabu:
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
                 
                 image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i)
-                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'],
+                util_save_log_image_with_label(image_prefix, args.style_image_config_file,
                                     self.result_log, labels=['train_score'])
 
 

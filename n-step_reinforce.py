@@ -18,6 +18,7 @@ class NeuralTabu:
     def __init__(self):
         self.result_folder = get_result_folder()
         self.logger = logging.getLogger('root')
+        self.result_log = LogData()
         self.env_training = Env()
         self.env_validation = Env()
         self.eps = np.finfo(np.float32).eps.item()
@@ -69,7 +70,7 @@ class NeuralTabu:
         self.gap_incumbent = np.inf
         self.gap_last_step = np.inf
 
-    def learn(self, rewards, log_probs, ents, optimizer):
+    def learn(self, rewards, log_probs, ents, optimizer, batch_i):
 
         # compute discounted return
         R = torch.zeros_like(rewards[0], dtype=torch.float, device=rewards[0].device)
@@ -93,6 +94,8 @@ class NeuralTabu:
 
         # compute REINFORCE loss with entropy loss
         loss = - (log_probs * normalized_return + args.ent_coeff * ents).sum(dim=-1).mean()
+
+        self.result_log.append('train_loss', batch_i * args.transit + self.env_training.itr, loss.item())
 
         # backward
         optimizer.zero_grad()
@@ -288,7 +291,7 @@ class NeuralTabu:
 
                 if self.env_training.itr % args.steps_learn == 0:
                     # training...
-                    self.learn(reward_buffer, log_prob_buffer, entropy_buffer, optimizer)
+                    self.learn(reward_buffer, log_prob_buffer, entropy_buffer, optimizer, batch_i)
                     # clean training data
                     reward_buffer = []
                     log_prob_buffer = []
@@ -315,8 +318,9 @@ class NeuralTabu:
                 np.save('./log/validation_log_{}.npy'.format(self.algo_config), np.array(validation_log))
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
 
-                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i)
-                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'],
+                self.result_log.append('train_gap', batch_i, gap_last_step)
+                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i * args.transit)
+                util_save_log_image_with_label(image_prefix, args.style_image_config_file,
                                     self.result_log, labels=['train_score'])
 
 

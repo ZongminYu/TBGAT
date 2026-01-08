@@ -45,5 +45,6 @@ parser.add_argument('--t_j', type=int, default=10)
 parser.add_argument('--t_m', type=int, default=10)
 parser.add_argument('--t_seed', type=int, default=1)
 parser.add_argument('--drl_with_tabu', type=str, default='False', choices=('True', 'False'))
+parser.add_argument('--style_image_config_file', type=str, default='style_image_config.json')
 
 args = parser.parse_args()
