@@ -12,7 +12,7 @@ from env.message_passing_evl import exact_solver
 from parameters import args
 from tqdm import tqdm
 import logging
-from utils import create_logger, copy_all_src, get_result_folder
+from utils import *
 
 class NeuralTabu:
     def __init__(self):
@@ -136,6 +136,8 @@ class NeuralTabu:
             )
         
         # calculate optimal gap
+        # result_incumbent: 这是模型在搜索过程中找到的历史最好解（Best Solution Found So Far）。
+        # result_last_step: 这是模型在最后一步搜索结束后得到的解。
         result_incumbent = self.env_validation.incumbent_objs.cpu().numpy()
         result_last_step = self.env_validation.current_objs.cpu().numpy()
         gap_incumbent = ((result_incumbent - self.validation_Cmax) / self.validation_Cmax).mean()
@@ -327,6 +329,10 @@ class NeuralTabu:
                 validation_log.append([gap_incumbent, gap_last_step])
                 np.save('./log/validation_log_{}.npy'.format(self.algo_config), np.array(validation_log))
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
+                
+                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i)
+                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'],
+                                    self.result_log, labels=['train_score'])
 
 
 logger_params = {

@@ -15,6 +15,7 @@ import networkx as nx
 import random
 from env.message_passing_evl import cpm_forward_and_backward
 import logging
+from torch.nn.utils.rnn import pad_sequence
 
 def index_to_mask(index, size=None):
     """
@@ -206,6 +207,7 @@ class Env:
         x = torch.cat([dur_fea, est_fea, lst_fea, fwd_topo_fea, bwd_topo_fea], dim=1)
         G_batch.x = x
         G_batch.__setattr__("est", est)
+        G_batch.lst = lst.int()
         G_batch.__setattr__("num_node_per_example", self.num_nodes_per_example)
 
         return G_batch, make_span, count
@@ -623,7 +625,128 @@ class Env:
 
         return self.G_batch, self.get_candidate_moves()
 
+    def indicators(self, G, tabu_list, feasible_action=None):
+        """
+        优化后版本：批量处理索引查找+向量化禁忌检查+缓存优化
+        """
+        # 1. 动作拼接
+        t1_ = time.time()
+        action_merged_with_tabu_label = torch.cat([actions[0] for actions in feasible_action if actions], dim=0)
+        actions_merged = action_merged_with_tabu_label[:, :2]
+        tabu_label = action_merged_with_tabu_label[:, [2]]
+        u, v = actions_merged[:, 0], actions_merged[:, 1]
 
+        # 2. 批量优化索引查找（核心）
+        # 预构建conjunctions映射
+        src_conj, dst_conj = G.edge_index_conjunctions
+        sorted_idx_conj = torch.argsort(src_conj)
+        sorted_src_conj = src_conj[sorted_idx_conj]
+        sorted_dst_conj = dst_conj[sorted_idx_conj]
+        
+        # 批量查找js_u
+        pos_u = torch.searchsorted(sorted_src_conj, u)
+        pos_u = torch.clamp(pos_u, 0, len(sorted_src_conj)-1)
+        mask_u_conj = sorted_src_conj[pos_u] == u
+        default_valu = torch.tensor(0, device=u.device)
+        js_u = torch.where(mask_u_conj, sorted_dst_conj[pos_u], default_valu)
+        
+        # 批量查找js_v
+        pos_v = torch.searchsorted(sorted_src_conj, v)
+        pos_v = torch.clamp(pos_v, 0, len(sorted_src_conj)-1)
+        mask_v_conj = sorted_src_conj[pos_v] == v
+        js_v = torch.where(mask_v_conj, sorted_dst_conj[pos_v], default_valu)
+        
+        # 批量查找jp_v（dst→src）
+        src_conj_rev, dst_conj_rev = dst_conj, src_conj
+        sorted_idx_conj_rev = torch.argsort(src_conj_rev)
+        sorted_src_conj_rev = src_conj_rev[sorted_idx_conj_rev]
+        sorted_dst_conj_rev = dst_conj_rev[sorted_idx_conj_rev]
+        pos_jp_v = torch.searchsorted(sorted_src_conj_rev, v)
+        pos_jp_v = torch.clamp(pos_jp_v, 0, len(sorted_src_conj_rev)-1)
+        mask_jp_v = sorted_src_conj_rev[pos_jp_v] == v
+        jp_v = torch.where(mask_jp_v, sorted_dst_conj_rev[pos_jp_v], default_valu)
+        
+        # 批量查找ms_u/ms_v/mp_u
+        e0, e1 = G.edge_index_disjunctions
+        sorted_idx_disj = torch.argsort(e0)
+        sorted_e0 = e0[sorted_idx_disj]
+        sorted_e1 = e1[sorted_idx_disj]
+        
+        # ms_v
+        pos_ms_v = torch.searchsorted(sorted_e0, v)
+        pos_ms_v = torch.clamp(pos_ms_v, 0, len(sorted_e0)-1)
+        mask_ms_v = sorted_e0[pos_ms_v] == v
+        ms_v = torch.where(mask_ms_v, sorted_e1[pos_ms_v], default_valu)
+        
+        # ms_u
+        pos_ms_u = torch.searchsorted(sorted_e0, u)
+        pos_ms_u = torch.clamp(pos_ms_u, 0, len(sorted_e0)-1)
+        mask_ms_u = sorted_e0[pos_ms_u] == u
+        ms_u = torch.where(mask_ms_u, sorted_e1[pos_ms_u], default_valu)
+        
+        # mp_u（e1→e0）
+        sorted_idx_disj_rev = torch.argsort(e1)
+        sorted_e1_rev = e1[sorted_idx_disj_rev]
+        sorted_e0_rev = e0[sorted_idx_disj_rev]
+        pos_mp_u = torch.searchsorted(sorted_e1_rev, u)
+        pos_mp_u = torch.clamp(pos_mp_u, 0, len(sorted_e1_rev)-1)
+        mask_mp_u = sorted_e1_rev[pos_mp_u] == u
+        mp_u = torch.where(mask_mp_u, sorted_e0_rev[pos_mp_u], default_valu)
+
+        # 3. 计算ECT（复用预缓存的squeezed dur）
+        ect_mp_u = (G.est[mp_u] + G.dur[mp_u].squeeze()).int()
+        ect_jp_v = (G.est[jp_v] + G.dur[jp_v].squeeze()).int()
+        ect1_v = (torch.max(ect_mp_u, ect_jp_v) + G.dur[v].squeeze()).int()
+        ect1_u = (torch.max(G.est[u], ect1_v) + G.dur[u].squeeze()).int()
+
+        # 4. 命题计算
+        proposition_1 = G.lst[js_v] <= ect1_v
+        proposition_2 = G.lst[js_u] <= ect1_u
+        proposition_3 = G.lst[ms_v] <= ect1_u
+        P = ~proposition_1 & ~proposition_2 & ~proposition_3 
+
+        # 5. 向量化禁忌检查（优化后）
+        action_instance_id = G.batch[u]
+        padded_tabu = pad_sequence(tabu_list, batch_first=True, padding_value=-1)
+        relevant_tabus = padded_tabu[action_instance_id]
+        actions_to_check = actions_merged.flip([1]).unsqueeze(1)
+        
+        # 仅比较有效禁忌列表长度
+        tabu_lengths = torch.tensor([len(t) for t in tabu_list], device=action_instance_id.device)
+        relevant_lengths = tabu_lengths[action_instance_id]
+        max_len = padded_tabu.shape[1]
+        valid_mask = torch.arange(max_len, device=padded_tabu.device).unsqueeze(0) < relevant_lengths.unsqueeze(1)
+        relevant_tabus_masked = relevant_tabus.masked_fill(~valid_mask.unsqueeze(-1), -1)
+        
+        T = (relevant_tabus_masked == actions_to_check).all(dim=-1).any(dim=-1)
+
+        t2_ = time.time()
+        # self.logger.info("actions_merged.shape: {}".format(len(actions_merged)))
+        # self.logger.info("actions_merged: {}".format(actions_merged))
+        # self.logger.info("u: {}".format(u))
+        # self.logger.info("v: {}".format(v))
+        # self.logger.info("jp_v: {}".format(jp_v))
+        # self.logger.info("js_v: {}".format(js_v))
+        # self.logger.info("ms_u: {}".format(ms_u))
+        # self.logger.info("mp_u: {}".format(mp_u))
+        # self.logger.info("ect_mp_u: {}".format(ect_mp_u))
+        # self.logger.info("ect_jp_v: {}".format(ect_jp_v))    
+        # self.logger.info("G.dur[v]: {}".format(G.dur[v].squeeze()))
+        # self.logger.info("ect1_v: {}".format(ect1_v))
+        # self.logger.info("G.est[u]: {}".format(G.est[u]))
+        # self.logger.info("G.dur[u]: {}".format(G.dur[u].squeeze()))
+        # self.logger.info("ect1_u: {}".format(ect1_u))
+        # self.logger.info("proposition_1: {}".format(proposition_1))
+        # self.logger.info("proposition_2: {}".format(proposition_2))
+        # self.logger.info("proposition_3: {}".format(proposition_3))
+        # self.logger.info("P: {}".format(P))
+        # self.logger.info("tabu_list.shape: {}".format(tabu_list[0].shape))
+        # self.logger.info("tabu_list: {}".format(tabu_list))
+        # self.logger.info("T: {}".format(T))
+        # self.logger.info("Indicators takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, self.num_instance))    
+        # self.logger.info("Indicators takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, self.num_instance))
+        return P, T, action_instance_id
+    
 if __name__ == '__main__':
     from generateJSP import uni_instance_gen
 

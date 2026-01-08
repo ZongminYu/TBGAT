@@ -278,9 +278,9 @@ class Actor(torch.nn.Module):
 
         # policy
         self.policy = Sequential(
-            Linear(out_channels * 8 + 1, out_channels * 2)
+            Linear(out_channels * 8 + 1 + 1, out_channels * 2)
             if args.embed_tabu_label else
-            Linear(out_channels * 8, out_channels * 2),
+            Linear(out_channels * 8 + 1, out_channels * 2),
             # torch.nn.BatchNorm1d(out_channels * 2),
             torch.nn.Tanh(),
             Linear(out_channels * 2, out_channels * 2),
@@ -292,7 +292,7 @@ class Actor(torch.nn.Module):
             Linear(out_channels * 2, 1),
         )
 
-    def forward(self, pyg_sol, feasible_action, optimal_mark, cmax=None, drop_out=0):
+    def forward(self, pyg_sol, feasible_action, optimal_mark, cmax=None, drop_out=0, P=None):
 
         action_list_merged = [actions[0] for actions in feasible_action if actions]
 
@@ -334,7 +334,8 @@ class Actor(torch.nn.Module):
                 sampled_action, log_prob_padded, entropy_padded = self.move_selector_ls(
                     action_set=feasible_action,
                     node_h=node_h,
-                    optimal_mark=optimal_mark
+                    optimal_mark=optimal_mark,
+                    P=P
                 )
                 return sampled_action, log_prob_padded, entropy_padded
             elif args.action_selection_type == 'ts_inner':
@@ -352,7 +353,8 @@ class Actor(torch.nn.Module):
     def move_selector_ls(self,
                          action_set,
                          node_h,
-                         optimal_mark):
+                         optimal_mark,
+                         P):
 
         ## compute action probability
         # get action embedding ready
@@ -364,7 +366,8 @@ class Actor(torch.nn.Module):
             [
                 node_h[actions_merged[:, 0]],
                 node_h[actions_merged[:, 1]],
-                tabu_label
+                tabu_label,
+                P.unsqueeze(-1)
             ],
             dim=-1
         )

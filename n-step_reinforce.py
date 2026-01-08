@@ -12,7 +12,7 @@ from env.message_passing_evl import exact_solver
 from parameters import args
 from tqdm import tqdm
 import logging
-from utils import create_logger, copy_all_src, get_result_folder
+from utils import *
 
 class NeuralTabu:
     def __init__(self):
@@ -114,11 +114,24 @@ class NeuralTabu:
 
         # rollout
         while self.env_validation.itr < args.transit:
+
+            P, T, action_instance_id = self.env_validation.indicators(
+                G=G,
+                tabu_list=self.env_validation.tabu_list,
+                feasible_action=action_set
+            )
             sampled_a, log_p, ent = policy(
                 pyg_sol=G,
                 feasible_action=action_set,
                 optimal_mark=optimal_mark,
+                P=P
             )
+            
+            # sampled_a, log_p, ent = policy(
+            #     pyg_sol=G,
+            #     feasible_action=action_set,
+            #     optimal_mark=optimal_mark,
+            # )
 
             G, reward, (action_set, optimal_mark, paths) = self.env_validation.step(
                 action=sampled_a,
@@ -249,10 +262,16 @@ class NeuralTabu:
             while self.env_training.itr < args.transit:
 
                 # forward
+                P, T, action_instance_id = self.env_training.indicators(
+                    G=G,
+                    tabu_list=self.env_training.tabu_list,
+                    feasible_action=action_set
+                )
                 sampled_a, log_p, ent = policy(
                     pyg_sol=G,
                     feasible_action=action_set,
                     optimal_mark=optimal_mark,
+                    P=P
                 )
 
                 # step
@@ -295,6 +314,10 @@ class NeuralTabu:
                 validation_log.append([gap_incumbent, gap_last_step])
                 np.save('./log/validation_log_{}.npy'.format(self.algo_config), np.array(validation_log))
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
+
+                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i)
+                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'],
+                                    self.result_log, labels=['train_score'])
 
 
 logger_params = {

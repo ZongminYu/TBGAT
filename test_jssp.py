@@ -20,7 +20,7 @@ def main():
     print('using {} to test...'.format(dev))
 
     # MDP config
-    performance_milestones = [500, 1000, 2000, 5000]
+    performance_milestones = [500] # [500, 1000, 2000, 5000]
     result_type = 'incumbent'  # 'last_step', 'incumbent'
     init = 'fdd-divide-wkr'  # 'fdd-divide-wkr', 'spt'
 
@@ -122,9 +122,9 @@ def main():
                 dropout_for_gat=args.dropout_for_gat
             ).to(dev).eval()
 
-            saved_model_path = './saved_model/incumbent_model_' + algo_config + '.pth'
-            # saved_model_path = './20260104_235907/Dv_-1-fdd-divide-wkr_128-128-4-0-LSI_JSSP-10x10-5e-05-10-500-64-128000-10-1e-05-6-False-ls-checkpoint-10.pt'
-            # saved_model_path = 'saved_model/retrain/incumbent_model_-1-fdd-divide-wkr_128-128-4-0-TPMCAM_JSSP-10x10-5e-05-10-500-64-128000-10-1e-05-6-False-ls.pth'
+            # saved_model_path = './saved_model/incumbent_model_' + algo_config + '.pth'
+            saved_model_path = './saved_model/retrain/incumbent_model_-1-fdd-divide-wkr_128-128-4-0-TPMCAM_JSSP-10x10-5e-05-10-500-64-128000-10-1e-05-6-False-ls.pth'
+            # saved_model_path = './output/20260107_230104/Dv--1-fdd-divide-wkr_128-128-4-0-LSI_JSSP-10x10-1e-05-10-500-64-128000-10-1e-05-6-False-ls-checkpoint-120.pt'
             print('loading model from:', saved_model_path)
             policy.load_state_dict(torch.load(saved_model_path, map_location=torch.device(dev)))
             pytorch_total_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
@@ -146,6 +146,21 @@ def main():
             drl_start = time.time()
             while env.itr < max(performance_milestones):
                 # t1 = time.time()
+                # P, T, action_instance_id = env.indicators(
+                #     G=G,
+                #     tabu_list=env.tabu_list,
+                #     feasible_action=action_set
+                # )
+
+                # sampled_a, log_p, ent = policy(
+                #     pyg_sol=G,
+                #     feasible_action=action_set,
+                #     optimal_mark=optimal_mark,
+                #     P=P,
+                #     T=T,
+                #     action_instance_id=action_instance_id
+                # )
+
                 sampled_a, log_p, ent = policy(
                     pyg_sol=G,
                     feasible_action=action_set,
