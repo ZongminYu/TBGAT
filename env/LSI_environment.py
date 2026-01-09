@@ -657,6 +657,7 @@ class Env:
         proposition_2 = G.lst[js_u] <= ect1_u
         proposition_3 = G.lst[ms_v] <= ect1_u
         P = ~proposition_1 & ~proposition_2 & ~proposition_3 
+        P = ~P
 
         # 5. 向量化禁忌检查（优化后）
         action_instance_id = G.batch[u]

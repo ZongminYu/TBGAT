@@ -319,9 +319,11 @@ class NeuralTabu:
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
 
                 self.result_log.append('train_gap', batch_i, gap_last_step)
-                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, batch_i * args.transit)
+                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, 2000)
                 util_save_log_image_with_label(image_prefix, args.style_image_config_file,
-                                    self.result_log, labels=['train_score'])
+                                    self.result_log, labels=['train_loss'])
+                util_save_log_image_with_label(image_prefix, args.style_image_config_file,
+                                    self.result_log, labels=['train_gap'])
 
 
 logger_params = {

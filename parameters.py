@@ -17,18 +17,18 @@ parser.add_argument('--out_channels', type=int, default=128)
 parser.add_argument('--heads', type=int, default=4)
 parser.add_argument('--dropout_for_gat', type=float, default=0)
 ## which embed net to use, if TPMCAM, its config is the same as that in the paper, the above params are no use.
-parser.add_argument('--embed_net', type=str, default='TBGAT', choices=('TBGAT', 'TPMCAM', 'LSI'))
+parser.add_argument('--embed_net', type=str, default='LSI', choices=('TBGAT', 'TPMCAM', 'LSI'))
 ## training parameters
 parser.add_argument('--j', type=int, default=10)
 parser.add_argument('--m', type=int, default=10)
 parser.add_argument('--l', type=int, default=1)
 parser.add_argument('--h', type=int, default=99)
-parser.add_argument('--lr', type=float, default=5e-5)  # TPMCAM: 5e-5; TBGAT, LSI : 1e-5
+parser.add_argument('--lr', type=float, default=1e-5)  # TPMCAM: 5e-5; TBGAT, LSI : 1e-5
 parser.add_argument('--steps_learn', type=int, default=10)
 parser.add_argument('--transit', type=int, default=500)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--total_instances', type=int, default=128000)
-parser.add_argument('--step_validation', type=int, default=1)
+parser.add_argument('--step_validation', type=int, default=10)
 parser.add_argument('--ent_coeff', type=float, default=1e-5)
 parser.add_argument('--validation_inst_number', type=int, default=100)
 parser.add_argument('--training_seed', type=int, default=6)  # 6
