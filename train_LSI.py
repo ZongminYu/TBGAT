@@ -238,9 +238,9 @@ class NeuralTabu:
         validation_log = []
 
         # add progress bar
-        # pbar = tqdm(range(1, args.total_instances // args.batch_size + 1))
+        pbar = tqdm(range(1, args.total_instances // args.batch_size + 1))
         
-        pbar = tqdm(range(1, 2), ncols=100)
+        # pbar = tqdm(range(1, 2), ncols=100)
         for batch_i in pbar:
             self.logger.info("start train batch_i :{}".format(batch_i))
             t1 = time.time()
