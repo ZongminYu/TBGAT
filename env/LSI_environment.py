@@ -16,6 +16,7 @@ import random
 from env.message_passing_evl import cpm_forward_and_backward
 import logging
 from torch.nn.utils.rnn import pad_sequence
+from torch_scatter import scatter_max
 
 def index_to_mask(index, size=None):
     """
@@ -510,7 +511,7 @@ class Env:
         # 将所有实例的候选moves合并为单个tensor，shape: [total_num_moves, 3]
         action_merged_with_tabu_label = torch.cat([actions[0] for actions in feasible_action if actions], dim=0)
         actions_merged = action_merged_with_tabu_label[:, :2]  # 提取move对(u, v)，shape: [total_num_moves, 2]
-        tabu_label = action_merged_with_tabu_label[:, [2]]  # 提取N5计算的tabu标签（暂未使用）
+        # tabu_label = action_merged_with_tabu_label[:, [2]]  # 提取N5计算的tabu标签（暂未使用）
         u, v = actions_merged[:, 0], actions_merged[:, 1]  # 分离出所有u和v节点，shape: [total_num_moves]
 
         if print_log:
@@ -533,6 +534,7 @@ class Env:
         js_u = torch.where(mask_u_conj, dst_conj[match_indices_u], u)  # 若找到后继则取之，否则js_u=u（作业末工序）
         
         if print_log:
+            self.logger.info("match_indices_u:{} \n {}".format(match_indices_u.shape, match_indices_u))
             self.logger.info("js_u:{} \n {}".format(js_u.shape, js_u))
 
         # -------- 查找js_v: v的作业后继节点 --------
@@ -556,6 +558,10 @@ class Env:
         # 提取机器约束边(disjunctions)：软约束，表示同一机器上工序的执行顺序
         e0, e1 = G.edge_index_disjunctions  # disjunctions边: e0 -> e1
         
+        if print_log:
+            self.logger.info("e0:{} \n {}".format(e0.shape, e0))
+            self.logger.info("e1:{} \n {}".format(e1.shape, e1))
+
         # -------- 查找ms_v: v在机器上的后继节点(machine successor) --------
         mask_ms_v_edges = (e0.unsqueeze(0) == v.unsqueeze(1))  # 找到所有从v出发的disjunctions边
         match_indices_ms_v = torch.argmax(mask_ms_v_edges.int(), dim=1)  # 取第一个匹配索引
@@ -582,6 +588,9 @@ class Env:
         # 若mp_u不存在(mask_mp_u=False)，说明u是机器首工序，无前驱约束，设为0
         ect_mp_u = torch.where(mask_mp_u, ect_mp_u_base, torch.zeros_like(ect_mp_u_base)).int()
         
+        if print_log:
+            self.logger.info("ect_mp_u_base:{} \n {}".format(ect_mp_u_base.shape, ect_mp_u_base))
+            self.logger.info("ect_mp_u:{} \n {}".format(ect_mp_u.shape, ect_mp_u))
         # -------- 计算ect_jp_v: jp_v的最早完成时间 --------
         ect_jp_v_base = G.est[jp_v] + G.dur[jp_v].squeeze()  # ECT = EST + duration
         # 若jp_v不存在(mask_jp_v=False)，说明v是作业首工序，无前驱约束，设为0
@@ -607,30 +616,46 @@ class Env:
         
         # -------- 为每个实例计算max_lst（用于边界工序） --------
         # 对于没有后继的工序（作业末/机器末），使用极大值避免误判为不可行
-        max_lst_per_instance = torch.zeros(G.batch.max() + 1, dtype=G.lst.dtype, device=G.lst.device)
-        for inst_id in range(G.batch.max() + 1):  # 遍历batch中的每个实例
-            inst_mask = G.batch == inst_id  # 获取属于当前实例的所有节点
-            max_lst_per_instance[inst_id] = G.lst[inst_mask].max() + 10000  # 实例内最大LST + 安全边距
-        
+        max_lst_per_instance = scatter_max(G.lst, G.batch, dim=0)[0] + 10000 # 实例内最大LST + 安全边距
+
+        if print_log:
+            self.logger.info("max_lst_per_instance:{} \n {}".format(max_lst_per_instance.shape, max_lst_per_instance))
         # -------- 条件1: LST(js_v) ≤ ECT'(v) --------
         # 检查v的作业后继是否违反时间约束
         v_instance_id = G.batch[v]  # v所属的实例ID
         max_lst_v = max_lst_per_instance[v_instance_id]  # v所属实例的max_lst
-        lst_js_v = torch.where(mask_v_conj, G.lst[js_v], max_lst_v)  # 若js_v存在取其LST，否则用max_lst
+        # 若js_v存在则取其LST，否则用 makespan - v的完成时间
+        v_finish_time = G.est[v] + G.dur[v].squeeze()
+        v_makespan = self.current_objs[v_instance_id]
+        lst_js_v = torch.where(mask_v_conj, G.lst[js_v], v_makespan - v_finish_time)
         proposition_1 = lst_js_v <= ect1_v  # True表示违反约束（后继节点最晚开始时间 ≤ v的新完成时间）
         
+        if print_log:
+            self.logger.info("v_instance_id:{} \n {}".format(v_instance_id.shape, v_instance_id))
+            self.logger.info("max_lst_v:{} \n {}".format(max_lst_v.shape, max_lst_v))
+            self.logger.info("lst_js_v:{} \n {}".format(lst_js_v.shape, lst_js_v))
         # -------- 条件2: LST(js_u) ≤ ECT'(u) --------
         # 检查u的作业后继是否违反时间约束
         u_instance_id = G.batch[u]  # u所属的实例ID
-        max_lst_u = max_lst_per_instance[u_instance_id]  # u所属实例的max_lst
-        lst_js_u = torch.where(mask_u_conj, G.lst[js_u], max_lst_u)  # 若js_u存在取其LST，否则用max_lst
+        # max_lst_u = max_lst_per_instance[u_instance_id]  # u所属实例的max_lst
+        # 若js_u存在则取其LST，否则用 makespan - u的完成时间
+        u_finish_time = G.est[u] + G.dur[u].squeeze()
+        u_makespan = self.current_objs[u_instance_id]
+        lst_js_u = torch.where(mask_u_conj, G.lst[js_u], u_makespan - u_finish_time)
         proposition_2 = lst_js_u <= ect1_u  # True表示违反约束
         
+        if print_log:
+            self.logger.info("lst_js_u:{} \n {}".format(lst_js_u.shape, lst_js_u))
+
         # -------- 条件3: LST(ms_v) ≤ ECT'(u) --------
         # 检查v的机器后继是否违反时间约束
-        lst_ms_v = torch.where(mask_ms_v, G.lst[ms_v], max_lst_v)  # 若ms_v存在取其LST，否则用max_lst
+        # 若ms_v存在则取其LST，否则用 makespan - v的完成时间
+        lst_ms_v = torch.where(mask_ms_v, G.lst[ms_v], v_makespan - v_finish_time)
         proposition_3 = lst_ms_v <= ect1_u  # True表示违反约束
         
+        if print_log:
+            self.logger.info("lst_ms_v:{} \n {}".format(lst_ms_v.shape, lst_ms_v))
+
         # -------- 计算最终可行性指示符P --------
         # P=True表示move不可行：三个条件同时为True时，反转会违反时间约束
         # （注意：这里P=True是infeasible，与论文定义一致）

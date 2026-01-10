@@ -152,9 +152,8 @@ class LSI_Model(nn.Module):
         sampled_action = torch.gather(
             padded_action, index=action_id.repeat(1, 2).view(-1, 1, 2), dim=1
         ).squeeze(dim=1)
-        # self.logger.info(feasible_action)
-        # self.logger.info(action_id)
-        # self.logger.info(sampled_action)
+        
+        # self.logger.info("sampled_action:{} \n {}".format(sampled_action.shape, sampled_action))
 
         # greedy action
         # action_id = torch.argmax(pi, dim=-1)

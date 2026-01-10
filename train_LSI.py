@@ -238,8 +238,9 @@ class NeuralTabu:
         validation_log = []
 
         # add progress bar
-        pbar = tqdm(range(1, args.total_instances // args.batch_size + 1))
-
+        # pbar = tqdm(range(1, args.total_instances // args.batch_size + 1))
+        
+        pbar = tqdm(range(1, 2), ncols=100)
         for batch_i in pbar:
             self.logger.info("start train batch_i :{}".format(batch_i))
             t1 = time.time()
@@ -261,6 +262,8 @@ class NeuralTabu:
             log_prob_buffer = []
             entropy_buffer = []
 
+            # if batch_i == 1:
+            #     visualize_gantt_from_gbatch(G_batch=G, out_dir=self.result_folder + '/G_batch_vis')
             # self.logger.info("G")
             # self.logger.info(G)
             # self.logger.info("G.edge_index_conjunctions.shape: {}".format(G.edge_index_conjunctions.shape))
@@ -280,7 +283,8 @@ class NeuralTabu:
                 P, T, action_instance_id = self.env_training.indicators(
                     G=G,
                     tabu_list=self.env_training.tabu_list,
-                    feasible_action=action_set
+                    feasible_action=action_set,
+                    print_log=False
                 )
 
                 sampled_a, log_p, ent = policy(
@@ -299,6 +303,7 @@ class NeuralTabu:
                     show_action_space_compute_time=False
                 )
 
+                # visualize_gantt_from_gbatch(G_batch=G, out_dir=self.result_folder + '/G_batch_vis_dst_{}'.format(self.env_training.itr))
                 # store training data
                 reward_buffer.append(reward)
                 log_prob_buffer.append(log_p)

@@ -1,3 +1,80 @@
+import plotly.figure_factory as ff
+import pandas as pd
+import os
+
+import plotly.graph_objects as go
+
+def visualize_gantt_from_gbatch(G_batch, out_dir="gantt_vis"):
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    ptr = G_batch.ptr.cpu().numpy()
+    import plotly.colors
+    for i in range(len(ptr) - 1):
+        node_start, node_end = ptr[i], ptr[i+1]
+        dur = G_batch.dur[node_start:node_end].cpu().numpy().squeeze()
+        est = G_batch.est[node_start:node_end].cpu().numpy().squeeze()
+        m_id = G_batch.m_id[node_start:node_end].cpu().numpy().squeeze()
+        # 尝试自动推断job_id（假设操作编号op与机器数有关）
+        num_ops = len(dur) - 2
+        # 估算job数
+        machine_ids = [int(x) for x in m_id[1:-1]]
+        n_machine = max(machine_ids) if machine_ids else 1
+        n_job = num_ops // n_machine if n_machine > 0 else 1
+        op_range = range(1, len(dur)-1)  # 去除S/T虚拟节点
+        num_real_ops = len(op_range)
+        
+        operations = []
+        for local_op_id, op in enumerate(op_range):
+            # op_id: 1~num_real_ops（每个batch内）
+            op_id = local_op_id + 1
+            global_op_id = op + node_start  # 全局节点编号（在G_batch中的真实索引）
+            job_id = (op_id - 1) // n_machine if n_machine > 0 else 0
+            machine = int(m_id[op])
+            if machine == -1:
+                continue
+            start = float(est[op])
+            finish = float(est[op] + dur[op])
+            duration = float(dur[op])
+            operations.append({
+                "Job": job_id,
+                "Machine": f"M{machine}",
+                "Start": start,
+                "Finish": finish,
+                "Duration": duration,
+                "OpID": op_id,
+                "GlobalOpID": global_op_id
+            })
+        if not operations:
+            continue
+        df = pd.DataFrame(operations)
+        machines = sorted(df['Machine'].unique())
+        # 分配颜色：同job同色
+        job_ids = sorted(df['Job'].unique())
+        color_map = plotly.colors.qualitative.Plotly
+        color_dict = {job: color_map[job % len(color_map)] for job in job_ids}
+        fig = go.Figure()
+        for idx, row in df.iterrows():
+            fig.add_trace(go.Bar(
+                x=[row['Duration']],
+                y=[row['Machine']],
+                base=[row['Start']],
+                orientation='h',
+                name=f"Job {row['Job']}",
+                marker=dict(color=color_dict[row['Job']], line=dict(width=1, color='black')),
+                customdata=[[row['Job'], row['Machine'], row['Start'], row['Finish'], row['Duration'], row['OpID'], row['GlobalOpID']]],
+                hovertemplate="Job: %{customdata[0]}<br>Machine: %{customdata[1]}<br>Start: %{customdata[2]}<br>Finish: %{customdata[3]}<br>Duration: %{customdata[4]}<br>OpID: %{customdata[5]}<br>GlobalOpID: %{customdata[6]}<extra></extra>"
+            ))
+        fig.update_layout(
+            barmode='stack',
+            title=f"Batch {i} Gantt Chart",
+            xaxis_title="Time",
+            yaxis_title="Machine",
+            yaxis=dict(categoryorder='array', categoryarray=machines),
+            legend_title_text="Job"
+        )
+        out_html = os.path.join(out_dir, f"batch_{i}.html")
+        fig.write_html(out_html)
+    # print(f"已生成 {len(ptr)-1} 个甘特图HTML文件，保存在 {out_dir}/")
 
 """
 The MIT License
@@ -339,4 +416,3 @@ def copy_all_src(dst_root):
                     dst_filepath = filepath.format(post_index)
 
                 shutil.copy(src_abspath, dst_filepath)
-

@@ -150,6 +150,7 @@ class NeuralTabu:
         validation_end = time.time()
 
         # saving model based on validation results
+        #这里的 gap_incumbent是当前学习步长的最佳值，self.gap_incumbent是全局最佳值
         if gap_incumbent < self.gap_incumbent:
             # print('Find better model w.r.t incumbent objs, saving model...')
             # torch.save(
