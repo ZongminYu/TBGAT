@@ -491,216 +491,177 @@ class Env:
         else:
             raise NotImplementedError('Not support for other NS yet.')
 
-    # def indicators(self, G, tabu_list, feasible_action=None):
-    #     t1_ = time.time()
-    #     action_merged_with_tabu_label = torch.cat([actions[0] for actions in feasible_action if actions], dim=0)
-    #         # action_merged_with_tabu_label.shape: torch.Size([all_actions_num, 3])
-        
-    #     actions_merged = action_merged_with_tabu_label[:, :2]
-    #     tabu_label = action_merged_with_tabu_label[:, [2]]
-
-    #     self.logger.info("actions_merged.shape: {}".format(len(actions_merged)))
-    #     # self.logger.info("actions_merged: {}".format(actions_merged))
-    #     u = actions_merged[:, 0]
-    #     v = actions_merged[:, 1]
-
-    #     self.logger.info("u.shape: {}".format(u.shape))
-    #     self.logger.info("u: {}".format(u))
-    #     self.logger.info("v.shape: {}".format(v.shape))
-    #     self.logger.info("v: {}".format(v))
-    #     js_u = torch.stack([G.edge_index_conjunctions[1][G.edge_index_conjunctions[0] == val][0] for val in u])
-    #     js_v = torch.stack([G.edge_index_conjunctions[1][G.edge_index_conjunctions[0] == val][0] for val in v])
-    #     jp_v = torch.stack([G.edge_index_conjunctions[0][G.edge_index_conjunctions[1] == val][0] for val in v])
-    #     # self.logger.info("jp_v: {}".format(jp_v))
-    #     # self.logger.info("js_v: {}".format(js_v))
-
-    #     default_valu = torch.tensor(0, device=v.device)
-    #     e0, e1 = G.edge_index_disjunctions
-    #     ms_v = torch.stack([e1[e0==val][0] if (e0==val).any() else default_valu for val in v])
-    #     ms_u = torch.stack([e1[e0==val][0] if (e0==val).any() else default_valu for val in u])
-    #     mp_u = torch.stack([e0[e1==val][0] if (e1==val).any() else default_valu for val in u])
-    #     # self.logger.info("ms_u: {}".format(ms_u))
-    #     # self.logger.info("mp_u: {}".format(mp_u))
-
-    #     ect_mp_u = (G.est[mp_u] + G.dur[mp_u].squeeze()).int()
-    #     ect_jp_v = (G.est[jp_v] + G.dur[jp_v].squeeze()).int()
-
-    #     # self.logger.info("ect_mp_u: {}".format(ect_mp_u))
-    #     # self.logger.info("ect_jp_v: {}".format(ect_jp_v))    
-    #     # self.logger.info("G.dur[v]: {}".format(G.dur[v].squeeze()))
-
-    #     ect1_v = (torch.max(ect_mp_u, ect_jp_v) + G.dur[v].squeeze()).int()
-    #     # self.logger.info("ect1_v: {}".format(ect1_v))
-    #     # self.logger.info("G.est[u]: {}".format(G.est[u]))
-    #     # self.logger.info("G.dur[u]: {}".format(G.dur[u].squeeze()))
-    #     ect1_u = (torch.max(G.est[u], ect1_v) + G.dur[u].squeeze()).int()
-
-    #     # self.logger.info("ect1_u: {}".format(ect1_u))
-
-    #     proposition_1 = G.lst[js_v] <= ect1_v
-    #     proposition_2 = G.lst[js_u] <= ect1_u
-    #     proposition_3 = G.lst[ms_v] <= ect1_u
-
-    #     # self.logger.info("proposition_1: {}".format(proposition_1))
-    #     # self.logger.info("proposition_2: {}".format(proposition_2))
-    #     # self.logger.info("proposition_3: {}".format(proposition_3))
-
-    #     P = ~proposition_1 & ~proposition_2 & ~proposition_3 
-    #     self.logger.info("P.shape: {}".format(P.shape))
-    #     self.logger.info("P: {}".format(P))
-
-    #     # self.logger.info("tabu_list.shape: {}".format(self.tabu_list[0].shape))
-
-    #     action_instance_id = G.batch[u] # Keep on device
-        
-    #     # Vectorized Tabu Check
-    #     # Pad tabu lists to create a batch tensor: [Batch_Size, Max_Tabu_Len, 2]
-    #     padded_tabu = pad_sequence(tabu_list, batch_first=True, padding_value=-1)
-        
-    #     # Gather tabu lists corresponding to each action's instance
-    #     # action_instance_id shape: [Total_Actions]
-    #     # relevant_tabus shape: [Total_Actions, Max_Tabu_Len, 2]
-    #     relevant_tabus = padded_tabu[action_instance_id] 
-
-    #     # Prepare actions for comparison
-    #     # actions_merged shape: [Total_Actions, 2]
-    #     # actions_to_check shape: [Total_Actions, 1, 2]
-    #     actions_to_check = actions_merged.flip([1]).unsqueeze(1)
-
-    #     # Compare
-    #     # T shape: [Total_Actions]
-    #     T = (relevant_tabus == actions_to_check).all(dim=-1).any(dim=-1)
-            
-    #     # self.logger.info("tabu_list: {}".format(self.tabu_list))
-    #     # self.logger.info("T: {}".format(T))
-
-    #     t2_ = time.time()
-    #     self.logger.info("Indicators takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, self.num_instance))
-    #     return P, T, action_instance_id
-
-    def indicators(self, G, tabu_list, feasible_action=None):
+    def indicators(self, G, tabu_list, feasible_action=None, print_log=False):
         """
-        优化后版本：批量处理索引查找+向量化禁忌检查+缓存优化
+        计算N5邻域中每个候选move的可行性指示符P和禁忌指示符T
+        
+        参数:
+            G: 批量图对象(Batch)，包含多个JSSP实例的析取图
+            tabu_list: 每个实例的禁忌表，list[tensor[tabu_size, 2]]
+            feasible_action: N5邻域中的候选moves，list[tensor[num_moves, 3]] (u, v, tabu_label)
+        
+        返回:
+            P: 可行性指示符，True表示move不可行(违反时间约束)
+            T: 禁忌指示符，True表示move在禁忌表中
+            action_instance_id: 每个action所属的实例ID
         """
-        # 1. 动作拼接
-        t1_ = time.time()
+        # ========================= 第1步：候选动作预处理 =========================
+        # t1_ = time.time()  # 记录开始时间
+        # 将所有实例的候选moves合并为单个tensor，shape: [total_num_moves, 3]
         action_merged_with_tabu_label = torch.cat([actions[0] for actions in feasible_action if actions], dim=0)
-        actions_merged = action_merged_with_tabu_label[:, :2]
-        tabu_label = action_merged_with_tabu_label[:, [2]]
-        u, v = actions_merged[:, 0], actions_merged[:, 1]
+        actions_merged = action_merged_with_tabu_label[:, :2]  # 提取move对(u, v)，shape: [total_num_moves, 2]
+        tabu_label = action_merged_with_tabu_label[:, [2]]  # 提取N5计算的tabu标签（暂未使用）
+        u, v = actions_merged[:, 0], actions_merged[:, 1]  # 分离出所有u和v节点，shape: [total_num_moves]
 
-        # 2. 批量优化索引查找（核心）
-        # 预构建conjunctions映射
-        src_conj, dst_conj = G.edge_index_conjunctions
-        sorted_idx_conj = torch.argsort(src_conj)
-        sorted_src_conj = src_conj[sorted_idx_conj]
-        sorted_dst_conj = dst_conj[sorted_idx_conj]
-        
-        # 批量查找js_u
-        pos_u = torch.searchsorted(sorted_src_conj, u)
-        pos_u = torch.clamp(pos_u, 0, len(sorted_src_conj)-1)
-        mask_u_conj = sorted_src_conj[pos_u] == u
-        default_valu = torch.tensor(0, device=u.device)
-        js_u = torch.where(mask_u_conj, sorted_dst_conj[pos_u], default_valu)
-        
-        # 批量查找js_v
-        pos_v = torch.searchsorted(sorted_src_conj, v)
-        pos_v = torch.clamp(pos_v, 0, len(sorted_src_conj)-1)
-        mask_v_conj = sorted_src_conj[pos_v] == v
-        js_v = torch.where(mask_v_conj, sorted_dst_conj[pos_v], default_valu)
-        
-        # 批量查找jp_v（dst→src）
-        src_conj_rev, dst_conj_rev = dst_conj, src_conj
-        sorted_idx_conj_rev = torch.argsort(src_conj_rev)
-        sorted_src_conj_rev = src_conj_rev[sorted_idx_conj_rev]
-        sorted_dst_conj_rev = dst_conj_rev[sorted_idx_conj_rev]
-        pos_jp_v = torch.searchsorted(sorted_src_conj_rev, v)
-        pos_jp_v = torch.clamp(pos_jp_v, 0, len(sorted_src_conj_rev)-1)
-        mask_jp_v = sorted_src_conj_rev[pos_jp_v] == v
-        jp_v = torch.where(mask_jp_v, sorted_dst_conj_rev[pos_jp_v], default_valu)
-        
-        # 批量查找ms_u/ms_v/mp_u
-        e0, e1 = G.edge_index_disjunctions
-        sorted_idx_disj = torch.argsort(e0)
-        sorted_e0 = e0[sorted_idx_disj]
-        sorted_e1 = e1[sorted_idx_disj]
-        
-        # ms_v
-        pos_ms_v = torch.searchsorted(sorted_e0, v)
-        pos_ms_v = torch.clamp(pos_ms_v, 0, len(sorted_e0)-1)
-        mask_ms_v = sorted_e0[pos_ms_v] == v
-        ms_v = torch.where(mask_ms_v, sorted_e1[pos_ms_v], default_valu)
-        
-        # ms_u
-        pos_ms_u = torch.searchsorted(sorted_e0, u)
-        pos_ms_u = torch.clamp(pos_ms_u, 0, len(sorted_e0)-1)
-        mask_ms_u = sorted_e0[pos_ms_u] == u
-        ms_u = torch.where(mask_ms_u, sorted_e1[pos_ms_u], default_valu)
-        
-        # mp_u（e1→e0）
-        sorted_idx_disj_rev = torch.argsort(e1)
-        sorted_e1_rev = e1[sorted_idx_disj_rev]
-        sorted_e0_rev = e0[sorted_idx_disj_rev]
-        pos_mp_u = torch.searchsorted(sorted_e1_rev, u)
-        pos_mp_u = torch.clamp(pos_mp_u, 0, len(sorted_e1_rev)-1)
-        mask_mp_u = sorted_e1_rev[pos_mp_u] == u
-        mp_u = torch.where(mask_mp_u, sorted_e0_rev[pos_mp_u], default_valu)
+        if print_log:
+            self.logger.info("u:{} \n {}".format(u.shape, u))
+            self.logger.info("v:{} \n {}".format(v.shape, v))
 
-        # 3. 计算ECT（复用预缓存的squeezed dur）
-        ect_mp_u = (G.est[mp_u] + G.dur[mp_u].squeeze()).int()
-        ect_jp_v = (G.est[jp_v] + G.dur[jp_v].squeeze()).int()
+        # ========================= 第2步：批量查找相关节点 =========================
+        # 提取作业约束边(conjunctions)：硬约束，表示同一作业内工序的先后顺序
+        src_conj, dst_conj = G.edge_index_conjunctions  # conjunctions边: src -> dst
+        
+        if print_log:
+            self.logger.info("src_conj:{} \n {}".format(src_conj.shape, src_conj))
+            self.logger.info("dst_conj:{} \n {}".format(dst_conj.shape, dst_conj))
+
+        # -------- 查找js_u: u的作业后继节点(job successor) --------
+        # 创建广播比较矩阵，shape: [num_actions, num_conj_edges]
+        mask_u_edges = (src_conj.unsqueeze(0) == u.unsqueeze(1))  # 找到所有从u出发的conjunctions边
+        match_indices_u = torch.argmax(mask_u_edges.int(), dim=1)  # 取第一个匹配索引，shape: [num_actions]
+        mask_u_conj = mask_u_edges[torch.arange(len(u)), match_indices_u]  # 验证是否真正匹配（非边界情况）
+        js_u = torch.where(mask_u_conj, dst_conj[match_indices_u], u)  # 若找到后继则取之，否则js_u=u（作业末工序）
+        
+        if print_log:
+            self.logger.info("js_u:{} \n {}".format(js_u.shape, js_u))
+
+        # -------- 查找js_v: v的作业后继节点 --------
+        mask_v_edges = (src_conj.unsqueeze(0) == v.unsqueeze(1))  # 找到所有从v出发的conjunctions边
+        match_indices_v = torch.argmax(mask_v_edges.int(), dim=1)  # 取第一个匹配索引
+        mask_v_conj = mask_v_edges[torch.arange(len(v)), match_indices_v]  # 验证是否匹配
+        js_v = torch.where(mask_v_conj, dst_conj[match_indices_v], v)  # 若找到后继则取之，否则js_v=v
+        
+        if print_log:
+            self.logger.info("js_v:{} \n {}".format(js_v.shape, js_v))
+
+        # -------- 查找jp_v: v的作业前驱节点(job predecessor) --------
+        mask_jp_v_edges = (dst_conj.unsqueeze(0) == v.unsqueeze(1))  # 找到所有指向v的conjunctions边
+        match_indices_jp_v = torch.argmax(mask_jp_v_edges.int(), dim=1)  # 取第一个匹配索引
+        mask_jp_v = mask_jp_v_edges[torch.arange(len(v)), match_indices_jp_v]  # 验证是否匹配
+        jp_v = torch.where(mask_jp_v, src_conj[match_indices_jp_v], v)  # 若找到前驱则取之，否则jp_v=v（作业首工序）
+        
+        if print_log:
+            self.logger.info("jp_v:{} \n {}".format(jp_v.shape, jp_v))
+
+        # 提取机器约束边(disjunctions)：软约束，表示同一机器上工序的执行顺序
+        e0, e1 = G.edge_index_disjunctions  # disjunctions边: e0 -> e1
+        
+        # -------- 查找ms_v: v在机器上的后继节点(machine successor) --------
+        mask_ms_v_edges = (e0.unsqueeze(0) == v.unsqueeze(1))  # 找到所有从v出发的disjunctions边
+        match_indices_ms_v = torch.argmax(mask_ms_v_edges.int(), dim=1)  # 取第一个匹配索引
+        mask_ms_v = mask_ms_v_edges[torch.arange(len(v)), match_indices_ms_v]  # 验证是否匹配
+        ms_v = torch.where(mask_ms_v, e1[match_indices_ms_v], v)  # 若找到后继则取之，否则ms_v=v（机器末工序）
+        
+        if print_log:
+            self.logger.info("ms_v:{} \n {}".format(ms_v.shape, ms_v))
+
+        # -------- 查找mp_u: u在机器上的前驱节点(machine predecessor) --------
+        mask_mp_u_edges = (e1.unsqueeze(0) == u.unsqueeze(1))  # 找到所有指向u的disjunctions边
+        match_indices_mp_u = torch.argmax(mask_mp_u_edges.int(), dim=1)  # 取第一个匹配索引
+        mask_mp_u = mask_mp_u_edges[torch.arange(len(u)), match_indices_mp_u]  # 验证是否匹配
+        mp_u = torch.where(mask_mp_u, e0[match_indices_mp_u], u)  # 若找到前驱则取之，否则mp_u=u（机器首工序）
+
+        if print_log:
+            self.logger.info("mp_u:{} \n {}".format(mp_u.shape, mp_u))
+
+        # ========================= 第3步：计算反转后的ECT（最早完成时间） =========================
+        # 根据Proposition 2，需要计算执行u->v反转为v->u后的最早完成时间
+        
+        # -------- 计算ect_mp_u: mp_u的最早完成时间 --------
+        ect_mp_u_base = G.est[mp_u] + G.dur[mp_u].squeeze()  # ECT = EST + duration
+        # 若mp_u不存在(mask_mp_u=False)，说明u是机器首工序，无前驱约束，设为0
+        ect_mp_u = torch.where(mask_mp_u, ect_mp_u_base, torch.zeros_like(ect_mp_u_base)).int()
+        
+        # -------- 计算ect_jp_v: jp_v的最早完成时间 --------
+        ect_jp_v_base = G.est[jp_v] + G.dur[jp_v].squeeze()  # ECT = EST + duration
+        # 若jp_v不存在(mask_jp_v=False)，说明v是作业首工序，无前驱约束，设为0
+        ect_jp_v = torch.where(mask_jp_v, ect_jp_v_base, torch.zeros_like(ect_jp_v_base)).int()
+        
+        # -------- 计算反转后v和u的最早完成时间 --------
+        # ect1_v: v反转到u之前执行后的最早完成时间 = max(机器前驱ECT, 作业前驱ECT) + v的加工时间
         ect1_v = (torch.max(ect_mp_u, ect_jp_v) + G.dur[v].squeeze()).int()
+        # ect1_u: u在v之后执行的最早完成时间 = max(u原始EST, v的新ECT) + u的加工时间
         ect1_u = (torch.max(G.est[u], ect1_v) + G.dur[u].squeeze()).int()
 
-        # 4. 命题计算
-        proposition_1 = G.lst[js_v] <= ect1_v
-        proposition_2 = G.lst[js_u] <= ect1_u
-        proposition_3 = G.lst[ms_v] <= ect1_u
-        P = ~proposition_1 & ~proposition_2 & ~proposition_3 
-        P = ~P
-
-        # 5. 向量化禁忌检查（优化后）
-        action_instance_id = G.batch[u]
-        padded_tabu = pad_sequence(tabu_list, batch_first=True, padding_value=-1)
-        relevant_tabus = padded_tabu[action_instance_id]
-        actions_to_check = actions_merged.flip([1]).unsqueeze(1)
+        if print_log:
+            self.logger.info("ect_mp_u:{} \n {}".format(ect_mp_u.shape, ect_mp_u))
+            self.logger.info("ect_jp_v:{} \n {}".format(ect_jp_v.shape, ect_jp_v))
+            self.logger.info("ect1_v:{} \n {}".format(ect1_v.shape, ect1_v))
+            self.logger.info("ect1_u:{} \n {}".format(ect1_u.shape, ect1_u))
+            
+        # ========================= 第4步：计算Proposition 2的三个条件 =========================
+        # Proposition 2检查反转是否违反时间窗约束（LST：最晚开始时间）
         
-        # 仅比较有效禁忌列表长度
-        tabu_lengths = torch.tensor([len(t) for t in tabu_list], device=action_instance_id.device)
-        relevant_lengths = tabu_lengths[action_instance_id]
-        max_len = padded_tabu.shape[1]
-        valid_mask = torch.arange(max_len, device=padded_tabu.device).unsqueeze(0) < relevant_lengths.unsqueeze(1)
-        relevant_tabus_masked = relevant_tabus.masked_fill(~valid_mask.unsqueeze(-1), -1)
+        # 获取每个action所属的实例ID（用于按实例计算max_lst）
+        action_instance_id = G.batch[u]  # shape: [num_actions]
         
-        T = (relevant_tabus_masked == actions_to_check).all(dim=-1).any(dim=-1)
+        # -------- 为每个实例计算max_lst（用于边界工序） --------
+        # 对于没有后继的工序（作业末/机器末），使用极大值避免误判为不可行
+        max_lst_per_instance = torch.zeros(G.batch.max() + 1, dtype=G.lst.dtype, device=G.lst.device)
+        for inst_id in range(G.batch.max() + 1):  # 遍历batch中的每个实例
+            inst_mask = G.batch == inst_id  # 获取属于当前实例的所有节点
+            max_lst_per_instance[inst_id] = G.lst[inst_mask].max() + 10000  # 实例内最大LST + 安全边距
+        
+        # -------- 条件1: LST(js_v) ≤ ECT'(v) --------
+        # 检查v的作业后继是否违反时间约束
+        v_instance_id = G.batch[v]  # v所属的实例ID
+        max_lst_v = max_lst_per_instance[v_instance_id]  # v所属实例的max_lst
+        lst_js_v = torch.where(mask_v_conj, G.lst[js_v], max_lst_v)  # 若js_v存在取其LST，否则用max_lst
+        proposition_1 = lst_js_v <= ect1_v  # True表示违反约束（后继节点最晚开始时间 ≤ v的新完成时间）
+        
+        # -------- 条件2: LST(js_u) ≤ ECT'(u) --------
+        # 检查u的作业后继是否违反时间约束
+        u_instance_id = G.batch[u]  # u所属的实例ID
+        max_lst_u = max_lst_per_instance[u_instance_id]  # u所属实例的max_lst
+        lst_js_u = torch.where(mask_u_conj, G.lst[js_u], max_lst_u)  # 若js_u存在取其LST，否则用max_lst
+        proposition_2 = lst_js_u <= ect1_u  # True表示违反约束
+        
+        # -------- 条件3: LST(ms_v) ≤ ECT'(u) --------
+        # 检查v的机器后继是否违反时间约束
+        lst_ms_v = torch.where(mask_ms_v, G.lst[ms_v], max_lst_v)  # 若ms_v存在取其LST，否则用max_lst
+        proposition_3 = lst_ms_v <= ect1_u  # True表示违反约束
+        
+        # -------- 计算最终可行性指示符P --------
+        # P=True表示move不可行：三个条件同时为True时，反转会违反时间约束
+        # （注意：这里P=True是infeasible，与论文定义一致）
+        P = proposition_1 & proposition_2 & proposition_3
 
-        t2_ = time.time()
-        # self.logger.info("actions_merged.shape: {}".format(len(actions_merged)))
-        # self.logger.info("actions_merged: {}".format(actions_merged))
-        # self.logger.info("u: {}".format(u))
-        # self.logger.info("v: {}".format(v))
-        # self.logger.info("jp_v: {}".format(jp_v))
-        # self.logger.info("js_v: {}".format(js_v))
-        # self.logger.info("ms_u: {}".format(ms_u))
-        # self.logger.info("mp_u: {}".format(mp_u))
-        # self.logger.info("ect_mp_u: {}".format(ect_mp_u))
-        # self.logger.info("ect_jp_v: {}".format(ect_jp_v))    
-        # self.logger.info("G.dur[v]: {}".format(G.dur[v].squeeze()))
-        # self.logger.info("ect1_v: {}".format(ect1_v))
-        # self.logger.info("G.est[u]: {}".format(G.est[u]))
-        # self.logger.info("G.dur[u]: {}".format(G.dur[u].squeeze()))
-        # self.logger.info("ect1_u: {}".format(ect1_u))
-        # self.logger.info("proposition_1: {}".format(proposition_1))
-        # self.logger.info("proposition_2: {}".format(proposition_2))
-        # self.logger.info("proposition_3: {}".format(proposition_3))
-        # self.logger.info("P: {}".format(P))
-        # self.logger.info("tabu_list.shape: {}".format(tabu_list[0].shape))
-        # self.logger.info("tabu_list: {}".format(tabu_list))
-        # self.logger.info("T: {}".format(T))
-        # self.logger.info("Indicators takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, self.num_instance))    
-        # self.logger.info("Indicators takes {:.4f} for N5 for {} instances.".format(t2_ - t1_, self.num_instance))
+        # ========================= 第5步：向量化禁忌检查 =========================
+        # 检查每个move的反向操作(v, u)是否在对应实例的禁忌表中
+        
+        action_instance_id = G.batch[u]  # 每个action所属的实例ID，shape: [num_actions]
+        # 将不同长度的tabu_list填充为统一长度，padding用-1填充（不可能匹配的值）
+        padded_tabu = pad_sequence(tabu_list, batch_first=True, padding_value=-1)  # [num_instances, max_tabu_len, 2]
+        relevant_tabus = padded_tabu[action_instance_id]  # 取出每个action对应实例的tabu表，[num_actions, max_tabu_len, 2]
+        actions_to_check = actions_merged.flip([1]).unsqueeze(1)  # 反转为(v,u)并扩维，[num_actions, 1, 2]
+        
+        # -------- 创建有效禁忌掩码（排除padding部分） --------
+        tabu_lengths = torch.tensor([len(t) for t in tabu_list], device=action_instance_id.device)  # 每个实例的真实tabu长度
+        relevant_lengths = tabu_lengths[action_instance_id]  # 每个action对应实例的tabu长度，[num_actions]
+        max_len = padded_tabu.shape[1]  # 填充后的最大长度
+        # 创建有效位置掩码：位置索引 < 真实长度的位置为True
+        valid_mask = torch.arange(max_len, device=padded_tabu.device).unsqueeze(0) < relevant_lengths.unsqueeze(1)  # [num_actions, max_len]
+        # 将无效位置（padding）用-1填充，确保不会匹配
+        relevant_tabus_masked = relevant_tabus.masked_fill(~valid_mask.unsqueeze(-1), -1)  # [num_actions, max_len, 2]
+        
+        # -------- 检查是否在禁忌表中 --------
+        # T=True表示(v,u)在禁忌表中：any实例的tabu表中有完全匹配的pair
+        T = (relevant_tabus_masked == actions_to_check).all(dim=-1).any(dim=-1)  # [num_actions]
+
+        # t2_ = time.time()  # 记录结束时间
+        
+        # 返回：P(可行性), T(禁忌), action_instance_id(每个action所属的实例)
         return P, T, action_instance_id
-
 
     def cpm_eval(self):
         makespan_cpm = []

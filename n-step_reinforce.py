@@ -13,12 +13,13 @@ from parameters import args
 from tqdm import tqdm
 import logging
 from utils import *
+from torch.utils.tensorboard import SummaryWriter 
 
 class NeuralTabu:
     def __init__(self):
         self.result_folder = get_result_folder()
         self.logger = logging.getLogger('root')
-        self.result_log = LogData()
+        self.tensorboard_writer = SummaryWriter(self.result_folder + '/tensorboard_logs')
         self.env_training = Env()
         self.env_validation = Env()
         self.eps = np.finfo(np.float32).eps.item()
@@ -94,8 +95,7 @@ class NeuralTabu:
 
         # compute REINFORCE loss with entropy loss
         loss = - (log_probs * normalized_return + args.ent_coeff * ents).sum(dim=-1).mean()
-
-        self.result_log.append('train_loss', batch_i * args.transit + self.env_training.itr, loss.item())
+        self.tensorboard_writer.add_scalar('Loss', loss.item(), batch_i * args.transit + self.env_training.itr)
 
         # backward
         optimizer.zero_grad()
@@ -301,6 +301,7 @@ class NeuralTabu:
 
             # training log
             training_log.append(self.env_training.current_objs.mean().cpu().item())
+            self.tensorboard_writer.add_scalar('train_makespan', self.env_training.current_objs.mean().cpu().item(), batch_i)
 
             pbar.set_postfix(
                 {'Batch Mean Performance': '{:.2f} ({:.2f}s)'.format(
@@ -317,13 +318,8 @@ class NeuralTabu:
                 validation_log.append([gap_incumbent, gap_last_step])
                 np.save('./log/validation_log_{}.npy'.format(self.algo_config), np.array(validation_log))
                 np.save('./log/training_log_{}.npy'.format(self.algo_config), np.array(training_log))
-
-                self.result_log.append('train_gap', batch_i, gap_last_step)
-                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, 2000)
-                util_save_log_image_with_label(image_prefix, args.style_image_config_file,
-                                    self.result_log, labels=['train_loss'])
-                util_save_log_image_with_label(image_prefix, args.style_image_config_file,
-                                    self.result_log, labels=['train_gap'])
+                self.tensorboard_writer.add_scalar('gap_incumbent', gap_incumbent, batch_i)
+                self.tensorboard_writer.add_scalar('gap_last_step', gap_last_step, batch_i)
 
 
 logger_params = {
@@ -337,3 +333,4 @@ if __name__ == '__main__':
     create_logger(**logger_params)
     copy_all_src(agent.result_folder)
     agent.train()
+    agent.tensorboard_writer.close()
